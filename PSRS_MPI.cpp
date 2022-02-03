@@ -10,7 +10,6 @@ using namespace std;
 #include <math.h>
 #include "mpi.h"
 
-// compare_ints() used by cstdlib::qsort() to compare two integers
 int compara(const void *i, const void *j)
 {
 	int int1 = *reinterpret_cast<const int *>(i);
@@ -20,7 +19,7 @@ int compara(const void *i, const void *j)
 	return 0;
 }
 
-// check array ordinato
+// funzione che verifica se l'array è ordinato
 string checkSort(int array[], int arrayStart, int arrayLength)
 {
 	for(int i=arrayStart; i<arrayStart+arrayLength-1;i++)
@@ -37,15 +36,13 @@ string checkSort(int array[], int arrayLength)
 	return checkSort(array,0,arrayLength);
 }
 
-
-//merging
-// This structure is what is placed in the priority queue: an index to the
-//		appropriate array,  an index to an element in the appropriate array, and
-//		the value of stored at the index of the element in the appropriate array
 struct m_data
 {
+	//index dell'array da unire
 	int st_index;
+	//index all'elemento nell'array
 	int index;
+	//valore dell'elemento
 	int st_value;
 
 	m_data(int st=0, int id=0, int stv = 0):st_index(st),index(id),st_value(stv){}
@@ -59,80 +56,68 @@ bool operator<( const m_data & uno, const m_data & due)
 	return uno.st_value > due.st_value;
 }
 
-int multimerge(int * starts[], const int len[], const int Number,int newArray[], const int newArray_Length)
+/*
+ * Un array bidimensionale di regularSamples per ogni processo, la lunghezza dei regularSamples
+ * per ogni processo, il numero di array da unire, l'array dei risultati, il volume totale di dati da unire
+ */ 
+int multiple_merge(int * starts[], const int len[], const int n,int newArray[], const int newArray_Length)
 {
- 	// Create priority queue.  There will be at most one item in the priority queue
- 	// for each of the Number lists.
- 	priority_queue< m_data> priorit;
 
- 	// Examine each of the Number start[] lists, place the first location into
-	// the priority 	queue if the list is not empty
- 	for(int i=0; i<Number;i++)
+ 	priority_queue< m_data> priorities;
+	/* 
+     *   Aggiungi il primo numero di ciascun array alla coda di priorità 
+	 * 	 se la lista non è vuota
+     */
+ 	for(int i = 0; i < n ; i++)
  	{
-		if (len[i]>0)
+		if (len[i] > 0)
 		{
-			priorit.push(m_data(i,0,starts[i][0]));
+			priorities.push(m_data(i,0,starts[i][0]));
 		}
 	}
-	// As long as priorities is not empty, pull off the top member (the smallest
-	//value from list i), push it into the newArray, and place the next element from
-	// list i in the priority queue
-	int newArray_index = 0;  // index into the merged array
-	while (!priorit.empty() && (newArray_index<newArray_Length))
-	{
-		// grab the smallest element, and remove it from the priority queue
-		m_data array = priorit.top();
-		priorit.pop();
 
-		// insert this smallest element into the merged array
+	int newArray_index = 0; 
+	while (!priorities.empty() && (newArray_index<newArray_Length))
+	{
+		// seleziono l'elemento più piccolo e lo toglie dalla coda prioritaria
+		m_data array = priorities.top();
+		priorities.pop();
+
+		// inserisco l'elemento più piccolo nell'array ordinato
 		newArray[newArray_index++] = starts[array.st_index][array.index];
 
-		// if start[array.st_index] is not empty, place the next member into priority
-		if ( len[array.st_index]>(array.index+1))
+		// se i dati acquisiti non sono l'ulitmo elemento nell'array allora
+		// inserisco nella coda prioritaria l'elemento successivo
+		if ( len[array.st_index] > (array.index + 1))
 		{
-			priorit.push(m_data(array.st_index, array.index+1,
-								starts[array.st_index][array.index+1]));
+			priorities.push(m_data(array.st_index, array.index + 1,
+								starts[array.st_index][array.index + 1]));
 		}
 }
 
-// return the logical size of the merged array
 return newArray_index;
 }
 
-
-//****  MAIN
-
-// La funzione main viene eseguita da ogni singolo processore
 int main( int argc, char* argv[])
 {
-	// identificativo del processore (rank), numero totali di processori
-    int IDproc, num_procs;
+	// ID del processore, numero totale di processori
+    int ID, nProc;
 
-	//variabile usata per il tempo dal processore principale (#0)
     double startwtime = 0.0, endwtime;
 
-
-	// *******************************************
-	//
-	//
-	// FASE 0 : Inizializzazione
-
-	// facciamo partire MPI e passiamo la linea di comando a MPI
+	// inizializzazione dell'ambiente di esecuzione MPI
     MPI::Init(argc, argv);
 
-	// raccogliamo informazioni riguardo i
-	// il numero di processori e l'identificativo di questo processore
-    num_procs = MPI::COMM_WORLD.Get_size();
-    IDproc = MPI::COMM_WORLD.Get_rank();
+	//numero di processori e ID
+    nProc = MPI::COMM_WORLD.Get_size();
+    ID = MPI::COMM_WORLD.Get_rank();
 
-	// look through arguments for:
-	//		 -DS nnnn to set myData_Size
-	//		 -SR nnnn to set seed_rand
+	// -DS usa myData_Size, ovvero il numero di campioni passati da riga di comando
+	// -SR usa seed_rand
 	int seed_rand = 1000;
 	int myData_Size = 4000;
 	for(int i=0;i<argc;i++)
 	{
-		// search for special arguments
 		if (strcmp(argv[i],"-DS")==0)
 		{
 			myData_Size = atoi(argv[i+1]); i++;
@@ -147,26 +132,26 @@ int main( int argc, char* argv[])
 	// myData_Lengths[] e myData_Starts[] usati con Scatterv() per distribuire
 	// myData[] agli altri processori
 	int myData[myData_Size];
-	int myData_Lengths[num_procs];
-	int myData_Starts[num_procs];
+	int myData_Lengths[nProc];
+	int myData_Starts[nProc];
 
 	// buffer di comunicazione usato per la determinazione dei valori dei pivot
-	int pivot_buff[num_procs*num_procs];
+	int pivot_buff[nProc*nProc];
 	int pivot_buffSize;
 
 
-	// Calcoliamo la lunghezza individuale di mydata[] da esser distribuita
-	// a processore numproc. L'ultimo processore avrà alcuni "extras"
-	for(int i=0;i<num_procs;i++)
+	// Calcolo la lunghezza di mydata[] per distribuirla
+	// al processore nProc. L'ultimo processore avrà lunghezza extra
+	for(int i=0;i<nProc;i++)
 	{
-		myData_Lengths[i] = myData_Size/num_procs;
-		myData_Starts[i]= i*myData_Size/num_procs;
+		myData_Lengths[i] = myData_Size/nProc;
+		myData_Starts[i]= i*myData_Size/nProc;
 	}
-	myData_Lengths[num_procs-1]+=(myData_Size%num_procs);
+	myData_Lengths[nProc-1]+=(myData_Size%nProc);
 
 
-	// Il nodo principale inizializza i dati da testare, e fa anche partire il timer
-    if (IDproc == 0)
+	// Il nodo principale inizializza i campioni e fa partire il tempo di esecuzione
+    if (ID == 0)
     {
 		// seme random
 		srandom(seed_rand);
@@ -178,105 +163,79 @@ int main( int argc, char* argv[])
 		startwtime = MPI::Wtime();
     }
 
-
-	// *******************************************
-	//
-	// FASE I:  Distribuiamo i dati, ordinamento locale e raccolta di campioni
-
-	// I dati sono distribuiti a tutti i processori dal processore principale (#0)
-	// Il processore principale esegue "in place"
-	if (IDproc==0)
+	/*
+	 * il processorore principale distribuisce i dati a tutti i processori
+	 * ed esegue in locale
+	 */
+	if (ID == 0)
 	{
-		MPI::COMM_WORLD.Scatterv(myData,myData_Lengths,myData_Starts,MPI::INT,MPI_IN_PLACE,myData_Lengths[IDproc],MPI::INT,0);
+		MPI::COMM_WORLD.Scatterv(myData,myData_Lengths,myData_Starts,MPI::INT,MPI_IN_PLACE,myData_Lengths[ID],MPI::INT,0);
 	}
 	else
 	{
-		MPI::COMM_WORLD.Scatterv(myData,myData_Lengths,myData_Starts,MPI::INT,myData,myData_Lengths[IDproc],MPI::INT,0);
+		MPI::COMM_WORLD.Scatterv(myData,myData_Lengths,myData_Starts,MPI::INT,myData,myData_Lengths[ID],MPI::INT,0);
 	}
 
-	// Tutti i processori ordinano il proprio pezzo di dati usando quicksort
-	qsort(myData,myData_Lengths[IDproc], sizeof(int), compara);
+	//Ogni processo ordina i propri dati
+	qsort(myData,myData_Lengths[ID], sizeof(int), compara);
 
 
-	//Tutti i processori raccolgono campioni regolari dalla lista ordinata considerando un offset pari all'indice di  myData[]
-	for(int index=0;index<num_procs;index++)
+	//Tutti i processi raccolgono campioni regolari dalla lista ordinata con offset = index*myData
+	for(int index=0;index<nProc;index++)
 	{
-		pivot_buff[index]= myData[index*myData_Lengths[IDproc]/num_procs];
+		pivot_buff[index]= myData[index*myData_Lengths[ID]/nProc];
 	}
 
-
-	// *******************************************
-	//
-	// FASE II:  Raccolta e fusione dei campioni, e trasmissione di p-1 pivot
-
-
-	// Il processore principale raccoglie tutti i candidati pivot dai processori, il processore principale ha in dati "in place"
-
-	if (IDproc==0)
+	//Il processore con rank 0 raccoglie i pivot, i suoi sono in locale
+	if (ID == 0)
 	{
-		MPI::COMM_WORLD.Gather(MPI_IN_PLACE,num_procs,MPI::INT,
-			pivot_buff,num_procs,MPI::INT,0);
+		MPI::COMM_WORLD.Gather(MPI_IN_PLACE,nProc,MPI::INT,
+			pivot_buff,nProc,MPI::INT,0);
 	}
 	else
 	{
-		MPI::COMM_WORLD.Gather(pivot_buff,num_procs,MPI::INT,
-			pivot_buff,num_procs,MPI::INT,0);
+		MPI::COMM_WORLD.Gather(pivot_buff,nProc,MPI::INT,
+			pivot_buff,nProc,MPI::INT,0);
 	}
 
-	// Il processore principale unisce le liste insieme e selezione
-	// il valori del pivot normale che devono essere trasmessi
-	if (IDproc == 0)
+	if (ID == 0)
 	{
+		
+		int *starts[nProc];  //array delle liste
+		int lengths[nProc];  //array della lunghezza delle liste
 
-		//unisce la lista del processore num_procs in una sola
-		int *starts[num_procs];  //array delle liste
-		int lengths[num_procs];  //array della lunghezza delle liste
-		for(int i=0;i<num_procs;i++)
+		//unisce le liste in una sola
+		for(int i = 0; i < nProc; i++)
 		{
-			starts[i]=&pivot_buff[i*num_procs];
-			lengths[i]=num_procs;
+			starts[i]=&pivot_buff[i*nProc];
+			lengths[i]=nProc;
 		}
-		int tempbuffer[num_procs*num_procs];  // lista "mergiata"
-		multimerge(starts,lengths,num_procs,tempbuffer,num_procs*num_procs);
+		int tempbuffer[nProc*nProc];
+		multiple_merge(starts,lengths,nProc,tempbuffer,nProc*nProc);
 
-		//seleziona regolarmente numprocs-1 pivot da trasmettere
-		// come partizione dei valori di pivot a myData
-		for(int i=0; i<num_procs-1; i++)
+		//seleziona nProc-1 pivot da inviare
+		for(int i=0; i<nProc-1; i++)
 		{
-			pivot_buff[i] = tempbuffer[(i+1)*num_procs];
+			pivot_buff[i] = tempbuffer[(i+1)*nProc];
 		}
 	}
-
-	// Root processor (#0) broadcasts the partition values
-	MPI::COMM_WORLD.Bcast(pivot_buff,num_procs-1,MPI::INT,0);
-
-
-	// *******************************************
-	//
-	// FASE III: Partizione dei dati locali
-
-	// Tutti i processori partizionano la loro parte di dati basandosi
-	// sui valori del pivot memorizzati in pivot_buff[]
-
-	// Informazioni di partizionamento per myData[]:
-	// 				l'indice dell'inizione della i-esaima classe è class_Start[i]
-	//				la lunghezza della i-esima classe è classLenght[i]
-	//				e i membri della i-esima classe, myData[j], hanno la seguente proprietà
-	//				  pivot_buff[i-1]<= myData[j] < pivot_buff[i]
-
-	int class_Start[num_procs];
-	int class_Length[num_procs];
+	// broadcast dei valori della partizione
+	MPI::COMM_WORLD.Bcast(pivot_buff,nProc-1,MPI::INT,0);
 
 
-	// è necessario  che ogni processore partizioni la propria lista usando i valori di pivot_buffs
+	int class_Start[nProc];  //indice dell'inizio della i-ma classe
+	int class_Length[nProc]; //lunghezza della i-ma classe 
+
+
+	// ogni processo partiziona la lista usando il valore di pivot_buff[]
 	int dataindex=0;
-	for(int classindex=0; classindex<num_procs-1; classindex++)
+	for(int classindex=0; classindex<nProc-1; classindex++)
 	{
 		class_Start[classindex] = dataindex;
 		class_Length[classindex]=0;
 
-		// purché dataindex si riferisca ai dati nella classe corrente
-		while((dataindex< myData_Lengths[IDproc])
+		// dataindex si riferisce ai dati nella classe corrente
+		while((dataindex< myData_Lengths[ID])
 			&& (myData[dataindex]<=pivot_buff[classindex]))
 		{
 			class_Length[classindex]++;
@@ -284,85 +243,71 @@ int main( int argc, char* argv[])
 		}
 	}
 	// imposta start and lenght per l'ultima classe
-	class_Start[num_procs-1] = dataindex;
-	class_Length[num_procs-1] = myData_Lengths[IDproc] - dataindex;
+	class_Start[nProc-1] = dataindex;
+	class_Length[nProc-1] = myData_Lengths[ID] - dataindex;
 
-
-	// *******************************************
-	//
-	// FASE IV: Tutte le i-esima classi sono raccolte dal processore i
+	//Tutte le i-esime classi sono raccolte dal processore i
 	int recv_buff[myData_Size];    //buffer per tenere in memoria tutti i membri della classe i
-	int recv_Lengths[num_procs];     // numero del processore, lunghezza di ogni numerodiprocessore-iesima classe
-	int recv_Starts[num_procs];      //indice che ci dice dove iniziare a memorizzare
+	int recv_Lengths[nProc];     // numero del processore, lunghezza di ogni numerodiprocessore-iesima classe
+	int recv_Starts[nProc];      //indice che ci dice dove iniziare a memorizzare
 
 
-	//si prendono tutte le liste orindare e tutti i valori ordinati del iprocessore-esima classe
-	for(int iprocessor=0; iprocessor<num_procs; iprocessor++)
+	//si prendono tutte le liste orindate e tutti i valori ordinati del iprocessore-esima classe
+	for(int iprocessor=0; iprocessor < nProc; iprocessor++)
 	{
-		// Each processor, iprocessor gathers up the numproc lengths of the sorted
-		// values in the iprocessor class
+		//ogni processo raccoglie la lunghezza degli valori ordinati nella classe dell' iprocessor
 		MPI::COMM_WORLD.Gather(&class_Length[iprocessor], 1, MPI::INT,recv_Lengths,1,MPI::INT,iprocessor);
 
-
-		// From these lengths the myid^th class starts are computed on
-		// processor IDproc
-		if (IDproc == iprocessor)
+		// da questa lunghezza sono calcolati gli offset di start su ogni processore
+		if (ID == iprocessor)
 		{
 			recv_Starts[0]=0;
-			for(int i=1;i<num_procs; i++)
+			for(int i=1;i<nProc; i++)
 			{
 				recv_Starts[i] = recv_Starts[i-1]+recv_Lengths[i-1];
 			}
 		}
 
-		// each iprocessor gathers up all the members of the iprocessor^th
-		// classes from the other nodes
 		MPI::COMM_WORLD.Gatherv(&myData[class_Start[iprocessor]],class_Length[iprocessor],MPI::INT,
 			recv_buff,recv_Lengths,recv_Starts,MPI::INT,iprocessor);
 	}
 
 
-	// multimerge these numproc lists on each processor
-	int *m_Starts[num_procs]; // array of list starts
-	for(int i=0;i<num_procs;i++)
+	// multiple_merge
+	int *m_Starts[nProc];
+	for(int i=0;i<nProc;i++)
 	{
 		m_Starts[i]=recv_buff+recv_Starts[i];
 	}
-	multimerge(m_Starts,recv_Lengths,num_procs,myData,myData_Size);
+	multiple_merge(m_Starts,recv_Lengths,nProc,myData,myData_Size);
 
-	int mysend_Length = recv_Starts[num_procs-1] + recv_Lengths[num_procs-1];
+	int mysend_Length = recv_Starts[nProc-1] + recv_Lengths[nProc-1];
 
-	// *******************************************
-	//
-	// PHASE VI:  Root processor collects all the data
-
-
-	int send_Lengths[num_procs]; // lengths of consolidated classes
-	int send_Starts[num_procs];  // starting points of classes
-	// Root processor gathers up the lengths of all the data to be gathered
+	int send_Lengths[nProc]; // lunghezza delle classi
+	int send_Starts[nProc];  // starting points delle classi
+	// il processo con rank 0 raccoglie le lunghezze di tutti i dati
 	MPI::COMM_WORLD.Gather(&mysend_Length,1,MPI::INT,send_Lengths,1,MPI::INT,0);
 
-	// The root processor compute starts from lengths of classes to gather
-	if (IDproc == 0)
+	// il nodo con rank 0 calcola l'offset di star dalla lunghezza delle classi da raccogliere
+	if (ID == 0)
 	{
 		send_Starts[0]=0;
-		for(int i=1; i<num_procs; i++)
+		for(int i=1; i<nProc; i++)
 		{
 			send_Starts[i] = send_Starts[i-1]+send_Lengths[i-1];
 		}
 	}
 
-	// Now we let processor #0 gather the pieces and glue them together in
-	// the right order
+	// il processo con rank 0 raccoglie le liste e le ordina
 	int arraySorted[myData_Size];
 	MPI::COMM_WORLD.Gatherv(myData,mysend_Length,MPI::INT,arraySorted,send_Lengths,send_Starts,MPI::INT,0);
 
-	//tempo sequenziale caso medio O(n^2) con n numero degli elementi
+
     double tseq = myData_Size * double(log10(myData_Size)) ;
     double speed_up = tseq / -(endwtime-startwtime) ;
-    double efficienza = speed_up / num_procs;
+    double efficienza = speed_up / myData_Size;
 
-    if (IDproc == 0)
+    if (ID == 0)
 	{
 		endwtime = MPI::Wtime();
         cout << "\nTempo di esecuzione totale (in secondi) = "
@@ -374,7 +319,7 @@ int main( int argc, char* argv[])
 		     <<  "\tSPEED-UP = " << speed_up << "\n\tEFFICIENZA = " << efficienza <<"\n"<< endl;
 	}
 
-    // shutdown MPI on the processor
+    // chiusura dell'ambiente MPI
     MPI::Finalize();
     return 0;
 }
